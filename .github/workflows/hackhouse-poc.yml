@@ -13,12 +13,17 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+    - name: Configure SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.CODEQL_SSH_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
     - uses: actions/checkout@v1
       with:
         submodules: recursive
-    - uses: Anthophila/codeql-action/codeql/init@master
+    - uses: ./codeql-action/codeql/init
       with:
         language: javascript
-    - uses: Anthophila/codeql-action/codeql/finish@master
+    - uses: ./codeql-action/codeql/finish
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

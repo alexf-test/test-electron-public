@@ -25,5 +25,10 @@ jobs:
       with:
         language: javascript
     - uses: ./codeql-action/codeql/finish
+      with:
+        results_folder: ../codeql_results/sarif
+    - uses: ./codeql-action/codeql/upload-sarif
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        sarif_folder: ../codeql_results/sarif

@@ -135,6 +135,7 @@
     ]
   },
   "dependencies": {
+    "@microsoft/eslint-formatter-sarif": "^2.1.2",
     "@types/multiparty": "^0.0.32",
     "@types/temp": "^0.8.34"
   }

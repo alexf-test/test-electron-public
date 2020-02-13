@@ -105,4 +105,4 @@ and more can be found in the [support document](docs/tutorial/support.md#finding
 
 When using the Electron or other GitHub logos, be sure to follow the [GitHub logo guidelines](https://github.com/logos).
 
-rev1
+rev2

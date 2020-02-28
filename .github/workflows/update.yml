@@ -3,8 +3,6 @@ name: "Update from upstream"
 on:
   schedule:
     - cron: '0 0 * * *'
-  label:
-    types: [created, edited]
 
 jobs:
   update:

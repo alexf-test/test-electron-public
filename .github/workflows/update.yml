@@ -1,0 +1,27 @@
+name: "Update from upstream"
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  label:
+    types: [created, edited]
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        repository: Anthophila/test-electron
+        fetch-depth: 0
+        ref: master
+    - name: Merge with upstream
+      run: |
+        git config --global user.email "test-electron-update@github.com"
+        git config --global user.name "test-electron update"
+        git remote add upstream https://github.com/electron/electron
+        git fetch upstream
+        git merge upstream/master
+        git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Anthophila/test-electron.git
+        git push origin HEAD:master

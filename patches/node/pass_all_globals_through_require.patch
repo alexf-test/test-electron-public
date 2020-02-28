@@ -6,10 +6,10 @@ Subject: Pass all globals through "require"
 (cherry picked from commit 7d015419cb7a0ecfe6728431a4ed2056cd411d62)
 
 diff --git a/lib/internal/modules/cjs/loader.js b/lib/internal/modules/cjs/loader.js
-index a1c6db94e49fb2f13c68dc503481beb3decf5cf4..481d59594dbca27c8529a8b424ab3cb190dd8def 100644
+index 7b1c1c5f16e6cc68be6a7188572c0a502ba73148..0265ce3f06405d4df5128ce1918be228d6eaa451 100644
 --- a/lib/internal/modules/cjs/loader.js
 +++ b/lib/internal/modules/cjs/loader.js
-@@ -83,6 +83,13 @@ const {
+@@ -101,6 +101,13 @@ const {
    CHAR_COLON
  } = require('internal/constants');
  
@@ -22,19 +22,19 @@ index a1c6db94e49fb2f13c68dc503481beb3decf5cf4..481d59594dbca27c8529a8b424ab3cb1
 +
  const isWindows = process.platform === 'win32';
  
- const relativeResolveCache = Object.create(null);
-@@ -951,10 +958,12 @@ Module.prototype._compile = function(content, filename) {
+ const relativeResolveCache = ObjectCreate(null);
+@@ -1152,10 +1159,12 @@ Module.prototype._compile = function(content, filename) {
    if (requireDepth === 0) statCache = new Map();
    if (inspectorWrapper) {
      result = inspectorWrapper(compiledWrapper, thisValue, exports,
 -                              require, module, filename, dirname);
-+                              require, module, filename, dirname, process,
-+                              localGlobal, localBuffer);
++                              require, module, filename, dirname,
++                              process, localGlobal, localBuffer);
    } else {
      result = compiledWrapper.call(thisValue, exports, require, module,
 -                                  filename, dirname);
 +                                  filename, dirname, process, localGlobal,
 +                                  localBuffer);
    }
+   hasLoadedAnyUserCJSModule = true;
    if (requireDepth === 0) statCache = null;
-   return result;

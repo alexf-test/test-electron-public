@@ -7,7 +7,9 @@
 #include <AvailabilityMacros.h>
 #include <objc/objc-runtime.h>
 
+#include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/mac/mac_util.h"
@@ -18,18 +20,19 @@
 #include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/desktop_media_id.h"
 #include "shell/browser/native_browser_view_mac.h"
-#include "shell/browser/ui/cocoa/atom_native_widget_mac.h"
-#include "shell/browser/ui/cocoa/atom_ns_window.h"
-#include "shell/browser/ui/cocoa/atom_ns_window_delegate.h"
-#include "shell/browser/ui/cocoa/atom_preview_item.h"
-#include "shell/browser/ui/cocoa/atom_touch_bar.h"
+#include "shell/browser/ui/cocoa/electron_native_widget_mac.h"
+#include "shell/browser/ui/cocoa/electron_ns_window.h"
+#include "shell/browser/ui/cocoa/electron_ns_window_delegate.h"
+#include "shell/browser/ui/cocoa/electron_preview_item.h"
+#include "shell/browser/ui/cocoa/electron_touch_bar.h"
 #include "shell/browser/ui/cocoa/root_view_mac.h"
 #include "shell/browser/ui/inspectable_web_contents.h"
 #include "shell/browser/ui/inspectable_web_contents_view.h"
 #include "shell/browser/window_list.h"
-#include "shell/common/deprecate_util.h"
+#include "shell/common/gin_converters/gfx_converter.h"
 #include "shell/common/gin_helper/dictionary.h"
 #include "shell/common/options_switches.h"
+#include "shell/common/process_util.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/webrtc/modules/desktop_capture/mac/window_list_utils.h"
 #include "ui/gfx/skia_util.h"
@@ -206,10 +209,10 @@
 
 @end
 
-@interface AtomProgressBar : NSProgressIndicator
+@interface ElectronProgressBar : NSProgressIndicator
 @end
 
-@implementation AtomProgressBar
+@implementation ElectronProgressBar
 
 - (void)drawRect:(NSRect)dirtyRect {
   if (self.style != NSProgressIndicatorBarStyle)
@@ -278,7 +281,7 @@ bool IsFramelessWindow(NSView* view) {
   NSWindow* nswindow = [view window];
   if (![nswindow respondsToSelector:@selector(shell)])
     return false;
-  NativeWindow* window = [static_cast<AtomNSWindow*>(nswindow) shell];
+  NativeWindow* window = [static_cast<ElectronNSWindow*>(nswindow) shell];
   return window && !window->has_frame();
 }
 
@@ -335,6 +338,7 @@ NativeWindowMac::NativeWindowMac(const gin_helper::Dictionary& options,
   options.Get(options::kZoomToPageWidth, &zoom_to_page_width_);
   options.Get(options::kFullscreenWindowTitle, &fullscreen_window_title_);
   options.Get(options::kSimpleFullScreen, &always_simple_fullscreen_);
+  options.Get(options::kTrafficLightPosition, &traffic_light_position_);
 
   bool minimizable = true;
   options.Get(options::kMinimizable, &minimizable);
@@ -385,14 +389,14 @@ NativeWindowMac::NativeWindowMac(const gin_helper::Dictionary& options,
   params.bounds = bounds;
   params.delegate = this;
   params.type = views::Widget::InitParams::TYPE_WINDOW;
-  params.native_widget = new AtomNativeWidgetMac(this, styleMask, widget());
+  params.native_widget = new ElectronNativeWidgetMac(this, styleMask, widget());
   widget()->Init(std::move(params));
-  window_ = static_cast<AtomNSWindow*>(
+  window_ = static_cast<ElectronNSWindow*>(
       widget()->GetNativeWindow().GetNativeNSWindow());
 
   [window_ setEnableLargerThanScreen:enable_larger_than_screen()];
 
-  window_delegate_.reset([[AtomNSWindowDelegate alloc] initWithShell:this]);
+  window_delegate_.reset([[ElectronNSWindowDelegate alloc] initWithShell:this]);
   [window_ setDelegate:window_delegate_];
 
   // Only use native parent window for non-modal windows.
@@ -507,6 +511,61 @@ NativeWindowMac::NativeWindowMac(const gin_helper::Dictionary& options,
 NativeWindowMac::~NativeWindowMac() {
   if (wheel_event_monitor_)
     [NSEvent removeMonitor:wheel_event_monitor_];
+}
+
+void NativeWindowMac::RepositionTrafficLights() {
+  if (!traffic_light_position_.x() && !traffic_light_position_.y()) {
+    return;
+  }
+
+  NSWindow* window = window_;
+  NSButton* close = [window standardWindowButton:NSWindowCloseButton];
+  NSButton* miniaturize =
+      [window standardWindowButton:NSWindowMiniaturizeButton];
+  NSButton* zoom = [window standardWindowButton:NSWindowZoomButton];
+  // Safety check just in case apple changes the view structure in a macOS
+  // update
+  DCHECK(close.superview);
+  DCHECK(close.superview.superview);
+  if (!close.superview || !close.superview.superview)
+    return;
+  NSView* titleBarContainerView = close.superview.superview;
+
+  // Hide the container when exiting fullscreen, otherwise traffic light buttons
+  // jump
+  if (exiting_fullscreen_) {
+    [titleBarContainerView setHidden:YES];
+    return;
+  }
+
+  [titleBarContainerView setHidden:NO];
+  CGFloat buttonHeight = [close frame].size.height;
+  CGFloat titleBarFrameHeight = buttonHeight + traffic_light_position_.y();
+  CGRect titleBarRect = titleBarContainerView.frame;
+  CGFloat titleBarWidth = NSWidth(titleBarRect);
+  titleBarRect.size.height = titleBarFrameHeight;
+  titleBarRect.origin.y = window.frame.size.height - titleBarFrameHeight;
+  [titleBarContainerView setFrame:titleBarRect];
+
+  BOOL isRTL = [titleBarContainerView userInterfaceLayoutDirection] ==
+               NSUserInterfaceLayoutDirectionRightToLeft;
+  NSArray* windowButtons = @[ close, miniaturize, zoom ];
+  const CGFloat space_between =
+      [miniaturize frame].origin.x - [close frame].origin.x;
+  for (NSUInteger i = 0; i < windowButtons.count; i++) {
+    NSView* view = [windowButtons objectAtIndex:i];
+    CGRect rect = [view frame];
+    if (isRTL) {
+      CGFloat buttonWidth = NSWidth(rect);
+      // origin is always top-left, even in RTL
+      rect.origin.x = titleBarWidth - traffic_light_position_.x() +
+                      (i * space_between) - buttonWidth;
+    } else {
+      rect.origin.x = traffic_light_position_.x() + (i * space_between);
+    }
+    rect.origin.y = (titleBarFrameHeight - rect.size.height) / 2;
+    [view setFrameOrigin:rect.origin];
+  }
 }
 
 void NativeWindowMac::SetContentView(views::View* view) {
@@ -626,6 +685,10 @@ bool NativeWindowMac::IsVisible() {
   // foreground of the app, which means that it should not be minimized or
   // occluded
   return [window_ isVisible] && !occluded && !IsMinimized();
+}
+
+void NativeWindowMac::SetExitingFullScreen(bool flag) {
+  exiting_fullscreen_ = flag;
 }
 
 bool NativeWindowMac::IsEnabled() {
@@ -817,7 +880,7 @@ void NativeWindowMac::SetAspectRatio(double aspect_ratio,
 
 void NativeWindowMac::PreviewFile(const std::string& path,
                                   const std::string& display_name) {
-  preview_item_.reset([[AtomPreviewItem alloc]
+  preview_item_.reset([[ElectronPreviewItem alloc]
       initWithURL:[NSURL fileURLWithPath:base::SysUTF8ToNSString(path)]
             title:base::SysUTF8ToNSString(display_name)]);
   [[QLPreviewPanel sharedPreviewPanel] makeKeyAndOrderFront:nil];
@@ -949,6 +1012,9 @@ void NativeWindowMac::Invalidate() {
 
 void NativeWindowMac::SetTitle(const std::string& title) {
   [window_ setTitle:base::SysUTF8ToNSString(title)];
+  if (title_bar_style_ == TitleBarStyle::HIDDEN) {
+    RepositionTrafficLights();
+  }
 }
 
 std::string NativeWindowMac::GetTitle() {
@@ -1014,7 +1080,7 @@ void NativeWindowMac::SetSimpleFullScreen(bool simple_fullscreen) {
       // Hide the titlebar
       SetStyleMask(false, NSWindowStyleMaskTitled);
 
-      // Resize the window to accomodate the _entire_ screen size
+      // Resize the window to accommodate the _entire_ screen size
       fullscreenFrame.size.height -=
           [[[NSApplication sharedApplication] mainMenu] menuBarHeight];
     } else if (!window_button_visibility_.has_value()) {
@@ -1100,6 +1166,11 @@ void NativeWindowMac::SetBackgroundColor(SkColor color) {
   base::ScopedCFTypeRef<CGColorRef> cgcolor(
       skia::CGColorCreateFromSkColor(color));
   [[[window_ contentView] layer] setBackgroundColor:cgcolor];
+}
+
+SkColor NativeWindowMac::GetBackgroundColor() {
+  return skia::CGColorRefToSkColor(
+      [[[window_ contentView] layer] backgroundColor]);
 }
 
 void NativeWindowMac::SetHasShadow(bool has_shadow) {
@@ -1238,7 +1309,7 @@ void NativeWindowMac::SetProgressBar(double progress,
 
     NSRect frame = NSMakeRect(0.0f, 0.0f, dock_tile.size.width, 15.0);
     NSProgressIndicator* progress_indicator =
-        [[[AtomProgressBar alloc] initWithFrame:frame] autorelease];
+        [[[ElectronProgressBar alloc] initWithFrame:frame] autorelease];
     [progress_indicator setStyle:NSProgressIndicatorBarStyle];
     [progress_indicator setIndeterminate:NO];
     [progress_indicator setBezeled:YES];
@@ -1266,11 +1337,8 @@ void NativeWindowMac::SetProgressBar(double progress,
 void NativeWindowMac::SetOverlayIcon(const gfx::Image& overlay,
                                      const std::string& description) {}
 
-void NativeWindowMac::SetVisibleOnAllWorkspaces(bool visible,
-                                                bool visibleOnFullScreen) {
+void NativeWindowMac::SetVisibleOnAllWorkspaces(bool visible) {
   SetCollectionBehavior(visible, NSWindowCollectionBehaviorCanJoinAllSpaces);
-  SetCollectionBehavior(visibleOnFullScreen,
-                        NSWindowCollectionBehaviorFullScreenAuxiliary);
 }
 
 bool NativeWindowMac::IsVisibleOnAllWorkspaces() {
@@ -1370,90 +1438,92 @@ void NativeWindowMac::SetVibrancy(const std::string& type) {
     [effect_view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
     [effect_view setBlendingMode:NSVisualEffectBlendingModeBehindWindow];
     [effect_view setState:NSVisualEffectStateActive];
+
+    // Make frameless Vibrant windows have rounded corners.
+    CGFloat radius = 5.0f;  // default corner radius
+    CGFloat dimension = 2 * radius + 1;
+    NSSize size = NSMakeSize(dimension, dimension);
+    NSImage* maskImage = [NSImage imageWithSize:size
+                                        flipped:NO
+                                 drawingHandler:^BOOL(NSRect rect) {
+                                   NSBezierPath* bezierPath = [NSBezierPath
+                                       bezierPathWithRoundedRect:rect
+                                                         xRadius:radius
+                                                         yRadius:radius];
+                                   [[NSColor blackColor] set];
+                                   [bezierPath fill];
+                                   return YES;
+                                 }];
+    [maskImage setCapInsets:NSEdgeInsetsMake(radius, radius, radius, radius)];
+    [maskImage setResizingMode:NSImageResizingModeStretch];
+
+    [effect_view setMaskImage:maskImage];
+    [window_ setCornerMask:maskImage];
+
     [[window_ contentView] addSubview:effect_view
                            positioned:NSWindowBelow
                            relativeTo:nil];
   }
 
-  std::string dep_warn =
-      " has been deprecated and will be removed in a future version of macOS.";
+  std::string dep_warn = " has been deprecated and removed as of macOS 10.15.";
   node::Environment* env =
       node::Environment::GetCurrent(v8::Isolate::GetCurrent());
 
   NSVisualEffectMaterial vibrancyType;
 
   if (type == "appearance-based") {
-    EmitDeprecationWarning(
-        env, "NSVisualEffectMaterialAppearanceBased" + dep_warn, "electron");
+    EmitWarning(env, "NSVisualEffectMaterialAppearanceBased" + dep_warn,
+                "electron");
     vibrancyType = NSVisualEffectMaterialAppearanceBased;
   } else if (type == "light") {
-    EmitDeprecationWarning(env, "NSVisualEffectMaterialLight" + dep_warn,
-                           "electron");
+    EmitWarning(env, "NSVisualEffectMaterialLight" + dep_warn, "electron");
     vibrancyType = NSVisualEffectMaterialLight;
   } else if (type == "dark") {
-    EmitDeprecationWarning(env, "NSVisualEffectMaterialDark" + dep_warn,
-                           "electron");
+    EmitWarning(env, "NSVisualEffectMaterialDark" + dep_warn, "electron");
     vibrancyType = NSVisualEffectMaterialDark;
   } else if (type == "titlebar") {
     vibrancyType = NSVisualEffectMaterialTitlebar;
   }
 
   if (@available(macOS 10.11, *)) {
-    // TODO(codebytere): Use NSVisualEffectMaterial* constants directly once
-    // they are available in the minimum SDK version
     if (type == "selection") {
-      // NSVisualEffectMaterialSelection
-      vibrancyType = static_cast<NSVisualEffectMaterial>(4);
+      vibrancyType = NSVisualEffectMaterialSelection;
     } else if (type == "menu") {
-      // NSVisualEffectMaterialMenu
-      vibrancyType = static_cast<NSVisualEffectMaterial>(5);
+      vibrancyType = NSVisualEffectMaterialMenu;
     } else if (type == "popover") {
-      // NSVisualEffectMaterialPopover
-      vibrancyType = static_cast<NSVisualEffectMaterial>(6);
+      vibrancyType = NSVisualEffectMaterialPopover;
     } else if (type == "sidebar") {
-      // NSVisualEffectMaterialSidebar
-      vibrancyType = static_cast<NSVisualEffectMaterial>(7);
+      vibrancyType = NSVisualEffectMaterialSidebar;
     } else if (type == "medium-light") {
-      // NSVisualEffectMaterialMediumLight
-      EmitDeprecationWarning(
-          env, "NSVisualEffectMaterialMediumLight" + dep_warn, "electron");
-      vibrancyType = static_cast<NSVisualEffectMaterial>(8);
+      EmitWarning(env, "NSVisualEffectMaterialMediumLight" + dep_warn,
+                  "electron");
+      vibrancyType = NSVisualEffectMaterialMediumLight;
     } else if (type == "ultra-dark") {
-      // NSVisualEffectMaterialUltraDark
-      EmitDeprecationWarning(env, "NSVisualEffectMaterialUltraDark" + dep_warn,
-                             "electron");
-      vibrancyType = static_cast<NSVisualEffectMaterial>(9);
+      EmitWarning(env, "NSVisualEffectMaterialUltraDark" + dep_warn,
+                  "electron");
+      vibrancyType = NSVisualEffectMaterialUltraDark;
     }
   }
 
   if (@available(macOS 10.14, *)) {
     if (type == "header") {
-      // NSVisualEffectMaterialHeaderView
-      vibrancyType = static_cast<NSVisualEffectMaterial>(10);
+      vibrancyType = NSVisualEffectMaterialHeaderView;
     } else if (type == "sheet") {
-      // NSVisualEffectMaterialSheet
-      vibrancyType = static_cast<NSVisualEffectMaterial>(11);
+      vibrancyType = NSVisualEffectMaterialSheet;
     } else if (type == "window") {
-      // NSVisualEffectMaterialWindowBackground
-      vibrancyType = static_cast<NSVisualEffectMaterial>(12);
+      vibrancyType = NSVisualEffectMaterialWindowBackground;
     } else if (type == "hud") {
-      // NSVisualEffectMaterialHUDWindow
-      vibrancyType = static_cast<NSVisualEffectMaterial>(13);
+      vibrancyType = NSVisualEffectMaterialHUDWindow;
     } else if (type == "fullscreen-ui") {
-      // NSVisualEffectMaterialFullScreenUI
-      vibrancyType = static_cast<NSVisualEffectMaterial>(16);
+      vibrancyType = NSVisualEffectMaterialFullScreenUI;
     } else if (type == "tooltip") {
-      // NSVisualEffectMaterialToolTip
-      vibrancyType = static_cast<NSVisualEffectMaterial>(17);
+      vibrancyType = NSVisualEffectMaterialToolTip;
     } else if (type == "content") {
-      // NSVisualEffectMaterialContentBackground
-      vibrancyType = static_cast<NSVisualEffectMaterial>(18);
+      vibrancyType = NSVisualEffectMaterialContentBackground;
     } else if (type == "under-window") {
-      // NSVisualEffectMaterialUnderWindowBackground
-      vibrancyType = static_cast<NSVisualEffectMaterial>(21);
+      vibrancyType = NSVisualEffectMaterialUnderWindowBackground;
     } else if (type == "under-page") {
-      // NSVisualEffectMaterialUnderPageBackground
-      vibrancyType = static_cast<NSVisualEffectMaterial>(22);
+      vibrancyType = NSVisualEffectMaterialUnderPageBackground;
     }
   }
 
@@ -1464,7 +1534,7 @@ void NativeWindowMac::SetVibrancy(const std::string& type) {
 void NativeWindowMac::SetTouchBar(
     std::vector<gin_helper::PersistentDictionary> items) {
   if (@available(macOS 10.12.2, *)) {
-    touch_bar_.reset([[AtomTouchBar alloc]
+    touch_bar_.reset([[ElectronTouchBar alloc]
         initWithDelegate:window_delegate_.get()
                   window:this
                 settings:std::move(items)]);

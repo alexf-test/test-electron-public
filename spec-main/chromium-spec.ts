@@ -309,7 +309,7 @@ describe('chromium features', () => {
       const w = new BrowserWindow({ show: false })
       w.webContents.once('did-finish-load', () => { done() })
       w.webContents.once('crashed', () => done(new Error('WebContents crashed.')))
-      w.loadFile(path.join(fixturesPath, 'pages', 'jquery.html'))
+      w.loadFile(path.join(__dirname, 'fixtures', 'pages', 'jquery.html'))
     })
   })
 
@@ -595,7 +595,7 @@ describe('chromium features', () => {
       }
       const w = new BrowserWindow({ show: false })
       w.loadURL('about:blank')
-      w.webContents.executeJavaScript(`b = window.open(${JSON.stringify(targetURL)})`)
+      w.webContents.executeJavaScript(`{ b = window.open(${JSON.stringify(targetURL)}); null }`)
       const [, window] = await emittedOnce(app, 'browser-window-created')
       await emittedOnce(window.webContents, 'did-finish-load')
       expect(await w.webContents.executeJavaScript(`b.location.href`)).to.equal(targetURL)
@@ -604,29 +604,29 @@ describe('chromium features', () => {
     it('defines a window.location setter', async () => {
       const w = new BrowserWindow({ show: false })
       w.loadURL('about:blank')
-      w.webContents.executeJavaScript(`b = window.open("about:blank")`)
+      w.webContents.executeJavaScript(`{ b = window.open("about:blank"); null }`)
       const [, { webContents }] = await emittedOnce(app, 'browser-window-created')
       await emittedOnce(webContents, 'did-finish-load')
       // When it loads, redirect
-      w.webContents.executeJavaScript(`b.location = ${JSON.stringify(`file://${fixturesPath}/pages/base-page.html`)}`)
+      w.webContents.executeJavaScript(`{ b.location = ${JSON.stringify(`file://${fixturesPath}/pages/base-page.html`)}; null }`)
       await emittedOnce(webContents, 'did-finish-load')
     })
 
     it('defines a window.location.href setter', async () => {
       const w = new BrowserWindow({ show: false })
       w.loadURL('about:blank')
-      w.webContents.executeJavaScript(`b = window.open("about:blank")`)
+      w.webContents.executeJavaScript(`{ b = window.open("about:blank"); null }`)
       const [, { webContents }] = await emittedOnce(app, 'browser-window-created')
       await emittedOnce(webContents, 'did-finish-load')
       // When it loads, redirect
-      w.webContents.executeJavaScript(`b.location.href = ${JSON.stringify(`file://${fixturesPath}/pages/base-page.html`)}`)
+      w.webContents.executeJavaScript(`{ b.location.href = ${JSON.stringify(`file://${fixturesPath}/pages/base-page.html`)}; null }`)
       await emittedOnce(webContents, 'did-finish-load')
     })
 
     it('open a blank page when no URL is specified', async () => {
       const w = new BrowserWindow({ show: false })
       w.loadURL('about:blank')
-      w.webContents.executeJavaScript(`b = window.open()`)
+      w.webContents.executeJavaScript(`{ b = window.open(); null }`)
       const [, { webContents }] = await emittedOnce(app, 'browser-window-created')
       await emittedOnce(webContents, 'did-finish-load')
       expect(await w.webContents.executeJavaScript(`b.location.href`)).to.equal('about:blank')
@@ -635,7 +635,7 @@ describe('chromium features', () => {
     it('open a blank page when an empty URL is specified', async () => {
       const w = new BrowserWindow({ show: false })
       w.loadURL('about:blank')
-      w.webContents.executeJavaScript(`b = window.open('')`)
+      w.webContents.executeJavaScript(`{ b = window.open(''); null }`)
       const [, { webContents }] = await emittedOnce(app, 'browser-window-created')
       await emittedOnce(webContents, 'did-finish-load')
       expect(await w.webContents.executeJavaScript(`b.location.href`)).to.equal('about:blank')
@@ -644,7 +644,7 @@ describe('chromium features', () => {
     it('sets the window title to the specified frameName', async () => {
       const w = new BrowserWindow({ show: false })
       w.loadURL('about:blank')
-      w.webContents.executeJavaScript(`b = window.open('', 'hello')`)
+      w.webContents.executeJavaScript(`{ b = window.open('', 'hello'); null }`)
       const [, window] = await emittedOnce(app, 'browser-window-created')
       expect(window.getTitle()).to.equal('hello')
     })
@@ -652,7 +652,7 @@ describe('chromium features', () => {
     it('does not throw an exception when the frameName is a built-in object property', async () => {
       const w = new BrowserWindow({ show: false })
       w.loadURL('about:blank')
-      w.webContents.executeJavaScript(`b = window.open('', '__proto__')`)
+      w.webContents.executeJavaScript(`{ b = window.open('', '__proto__'); null }`)
       const [, window] = await emittedOnce(app, 'browser-window-created')
       expect(window.getTitle()).to.equal('__proto__')
     })
@@ -694,6 +694,21 @@ describe('chromium features', () => {
       expect(labels.some((l: any) => l)).to.be.false()
     })
 
+    it('returns the same device ids across reloads', async () => {
+      const ses = session.fromPartition('persist:media-device-id')
+      const w = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          nodeIntegration: true,
+          session: ses
+        }
+      })
+      w.loadFile(path.join(fixturesPath, 'pages', 'media-id-reset.html'))
+      const [, firstDeviceIds] = await emittedOnce(ipcMain, 'deviceIds')
+      const [, secondDeviceIds] = await emittedOnce(ipcMain, 'deviceIds', () => w.webContents.reload())
+      expect(firstDeviceIds).to.deep.equal(secondDeviceIds)
+    })
+
     it('can return new device id when cookie storage is cleared', async () => {
       const ses = session.fromPartition('persist:media-device-id')
       const w = new BrowserWindow({
@@ -706,8 +721,7 @@ describe('chromium features', () => {
       w.loadFile(path.join(fixturesPath, 'pages', 'media-id-reset.html'))
       const [, firstDeviceIds] = await emittedOnce(ipcMain, 'deviceIds')
       await ses.clearStorageData({ storages: ['cookies'] })
-      w.webContents.reload()
-      const [, secondDeviceIds] = await emittedOnce(ipcMain, 'deviceIds')
+      const [, secondDeviceIds] = await emittedOnce(ipcMain, 'deviceIds', () => w.webContents.reload())
       expect(firstDeviceIds).to.not.deep.equal(secondDeviceIds)
     })
   })
@@ -766,22 +780,27 @@ describe('chromium features', () => {
 
     describe('when opened from main window', () => {
       for (const { parent, child, nodeIntegration, nativeWindowOpen, openerAccessible } of table) {
-        const description = `when parent=${s(parent)} opens child=${s(child)} with nodeIntegration=${nodeIntegration} nativeWindowOpen=${nativeWindowOpen}, child should ${openerAccessible ? '' : 'not '}be able to access opener`
-        it(description, async () => {
-          const w = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: true, nativeWindowOpen } })
-          await w.loadURL(parent)
-          const childOpenerLocation = await w.webContents.executeJavaScript(`new Promise(resolve => {
-            window.addEventListener('message', function f(e) {
-              resolve(e.data)
+        for (const sandboxPopup of [false, true]) {
+          const description = `when parent=${s(parent)} opens child=${s(child)} with nodeIntegration=${nodeIntegration} nativeWindowOpen=${nativeWindowOpen} sandboxPopup=${sandboxPopup}, child should ${openerAccessible ? '' : 'not '}be able to access opener`
+          it(description, async () => {
+            const w = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: true, nativeWindowOpen } })
+            w.webContents.once('new-window', (e, url, frameName, disposition, options) => {
+              options!.webPreferences!.sandbox = sandboxPopup
             })
-            window.open(${JSON.stringify(child)}, "", "show=no,nodeIntegration=${nodeIntegration ? 'yes' : 'no'}")
-          })`)
-          if (openerAccessible) {
-            expect(childOpenerLocation).to.be.a('string')
-          } else {
-            expect(childOpenerLocation).to.be.null()
-          }
-        })
+            await w.loadURL(parent)
+            const childOpenerLocation = await w.webContents.executeJavaScript(`new Promise(resolve => {
+              window.addEventListener('message', function f(e) {
+                resolve(e.data)
+              })
+              window.open(${JSON.stringify(child)}, "", "show=no,nodeIntegration=${nodeIntegration ? 'yes' : 'no'}")
+            })`)
+            if (openerAccessible) {
+              expect(childOpenerLocation).to.be.a('string')
+            } else {
+              expect(childOpenerLocation).to.be.null()
+            }
+          })
+        }
       }
     })
 
@@ -968,135 +987,41 @@ describe('chromium features', () => {
 
   ifdescribe(features.isPDFViewerEnabled())('PDF Viewer', () => {
     const pdfSource = url.format({
-      pathname: path.join(fixturesPath, 'assets', 'cat.pdf').replace(/\\/g, '/'),
-      protocol: 'file',
-      slashes: true
-    })
-    const pdfSourceWithParams = url.format({
-      pathname: path.join(fixturesPath, 'assets', 'cat.pdf').replace(/\\/g, '/'),
-      query: {
-        a: 1,
-        b: 2
-      },
+      pathname: path.join(__dirname, 'fixtures', 'cat.pdf').replace(/\\/g, '/'),
       protocol: 'file',
       slashes: true
     })
 
-    const createBrowserWindow = ({ plugins, preload }: { plugins: boolean, preload: string }) => {
-      return new BrowserWindow({
-        show: false,
-        webPreferences: {
-          preload: path.join(fixturesPath, 'module', preload),
-          plugins: plugins
-        }
-      })
-    }
-
-    const testPDFIsLoadedInSubFrame = (page: string, preloadFile: string, done: Function) => {
-      const pagePath = url.format({
-        pathname: path.join(fixturesPath, 'pages', page).replace(/\\/g, '/'),
-        protocol: 'file',
-        slashes: true
-      })
-
-      const w = createBrowserWindow({ plugins: true, preload: preloadFile })
-      ipcMain.once('pdf-loaded', (event, state) => {
-        expect(state).to.equal('success')
-        done()
-      })
-      w.webContents.on('page-title-updated', () => {
-        const parsedURL = url.parse(w.webContents.getURL(), true)
-        expect(parsedURL.protocol).to.equal('chrome:')
-        expect(parsedURL.hostname).to.equal('pdf-viewer')
-        expect(parsedURL.query.src).to.equal(pagePath)
-        expect(w.webContents.getTitle()).to.equal('cat.pdf')
-      })
-      w.loadFile(path.join(fixturesPath, 'pages', page))
-    }
-
-    it('opens when loading a pdf resource as top level navigation', (done) => {
-      const w = createBrowserWindow({ plugins: true, preload: 'preload-pdf-loaded.js' })
-      ipcMain.once('pdf-loaded', (event, state) => {
-        expect(state).to.equal('success')
-        done()
-      })
-      w.webContents.on('page-title-updated', () => {
-        const parsedURL = url.parse(w.webContents.getURL(), true)
-        expect(parsedURL.protocol).to.equal('chrome:')
-        expect(parsedURL.hostname).to.equal('pdf-viewer')
-        expect(parsedURL.query.src).to.equal(pdfSource)
-        expect(w.webContents.getTitle()).to.equal('cat.pdf')
-      })
-      w.webContents.loadURL(pdfSource)
-    })
-
-    it('opens a pdf link given params, the query string should be escaped', (done) => {
-      const w = createBrowserWindow({ plugins: true, preload: 'preload-pdf-loaded.js' })
-      ipcMain.once('pdf-loaded', (event, state) => {
-        expect(state).to.equal('success')
-        done()
-      })
-      w.webContents.on('page-title-updated', () => {
-        const parsedURL = url.parse(w.webContents.getURL(), true)
-        expect(parsedURL.protocol).to.equal('chrome:')
-        expect(parsedURL.hostname).to.equal('pdf-viewer')
-        expect(parsedURL.query.src).to.equal(pdfSourceWithParams)
-        expect(parsedURL.query.b).to.be.undefined()
-        expect(parsedURL.search!.endsWith('%3Fa%3D1%26b%3D2')).to.be.true()
-        expect(w.webContents.getTitle()).to.equal('cat.pdf')
-      })
-      w.webContents.loadURL(pdfSourceWithParams)
-    })
-
-    it('should download a pdf when plugins are disabled', async () => {
-      const w = createBrowserWindow({ plugins: false, preload: 'preload-pdf-loaded.js' })
-      w.webContents.loadURL(pdfSource)
-      const [state, filename, mimeType] = await new Promise(resolve => {
-        session.defaultSession.once('will-download', (event, item) => {
-          item.setSavePath(path.join(fixturesPath, 'mock.pdf'))
-          item.on('done', (e, state) => {
-            resolve([state, item.getFilename(), item.getMimeType()])
-          })
-        })
-      })
-      expect(state).to.equal('completed')
-      expect(filename).to.equal('cat.pdf')
-      expect(mimeType).to.equal('application/pdf')
-      fs.unlinkSync(path.join(fixturesPath, 'mock.pdf'))
-    })
-
-    it('should not open when pdf is requested as sub resource', async () => {
+    it('opens when loading a pdf resource as top level navigation', async () => {
       const w = new BrowserWindow({ show: false })
-      w.loadURL('about:blank')
-      const [status, title] = await w.webContents.executeJavaScript(`fetch(${JSON.stringify(pdfSource)}).then(res => [res.status, document.title])`)
-      expect(status).to.equal(200)
-      expect(title).to.not.equal('cat.pdf')
+      w.loadURL(pdfSource)
+      const [, contents] = await emittedOnce(app, 'web-contents-created')
+      expect(contents.getURL()).to.equal('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html')
+      await emittedOnce(contents, 'did-finish-load')
     })
 
-    it('opens when loading a pdf resource in a iframe', (done) => {
-      testPDFIsLoadedInSubFrame('pdf-in-iframe.html', 'preload-pdf-loaded-in-subframe.js', done)
-    })
-
-    it('opens when loading a pdf resource in a nested iframe', (done) => {
-      testPDFIsLoadedInSubFrame('pdf-in-nested-iframe.html', 'preload-pdf-loaded-in-nested-subframe.js', done)
+    it('opens when loading a pdf resource in a iframe', async () => {
+      const w = new BrowserWindow({ show: false })
+      w.loadFile(path.join(__dirname, 'fixtures', 'pages', 'pdf-in-iframe.html'))
+      const [, contents] = await emittedOnce(app, 'web-contents-created')
+      expect(contents.getURL()).to.equal('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html')
+      await emittedOnce(contents, 'did-finish-load')
     })
   })
 
   describe('window.history', () => {
     describe('window.history.pushState', () => {
-      it('should push state after calling history.pushState() from the same url', (done) => {
+      it('should push state after calling history.pushState() from the same url', async () => {
         const w = new BrowserWindow({ show: false })
-        w.webContents.once('did-finish-load', async () => {
-          // History should have current page by now.
-          expect((w.webContents as any).length()).to.equal(1)
+        await w.loadFile(path.join(fixturesPath, 'pages', 'blank.html'))
+        // History should have current page by now.
+        expect((w.webContents as any).length()).to.equal(1)
 
-          w.webContents.executeJavaScript('window.history.pushState({}, "")').then(() => {
-            // Initial page + pushed state
-            expect((w.webContents as any).length()).to.equal(2)
-            done()
-          })
-        })
-        w.loadURL('about:blank')
+        const waitCommit = emittedOnce(w.webContents, 'navigation-entry-committed')
+        w.webContents.executeJavaScript('window.history.pushState({}, "")')
+        await waitCommit
+        // Initial page + pushed state.
+        expect((w.webContents as any).length()).to.equal(2)
       })
     })
   })

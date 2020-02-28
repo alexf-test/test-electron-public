@@ -146,7 +146,7 @@ async function runRemoteBasedElectronTests () {
 
 async function runNativeElectronTests () {
   let testTargets = require('./native-test-targets.json')
-  const outDir = `out/${utils.getOutDir(false)}`
+  const outDir = `out/${utils.getOutDir()}`
 
   // If native tests are being run, only one arg would be relevant
   if (args.target && !testTargets.includes(args.target)) {
@@ -203,20 +203,24 @@ async function runMainProcessElectronTests () {
     exe = 'python'
   }
 
-  const { status } = childProcess.spawnSync(exe, runnerArgs, {
+  const { status, signal } = childProcess.spawnSync(exe, runnerArgs, {
     cwd: path.resolve(__dirname, '../..'),
     stdio: 'inherit'
   })
   if (status !== 0) {
-    const textStatus = process.platform === 'win32' ? `0x${status.toString(16)}` : status.toString()
-    console.log(`${fail} Electron tests failed with code ${textStatus}.`)
+    if (status) {
+      const textStatus = process.platform === 'win32' ? `0x${status.toString(16)}` : status.toString()
+      console.log(`${fail} Electron tests failed with code ${textStatus}.`)
+    } else {
+      console.log(`${fail} Electron tests failed with kill signal ${signal}.`)
+    }
     process.exit(1)
   }
   console.log(`${pass} Electron main process tests passed.`)
 }
 
 async function installSpecModules (dir) {
-  const nodeDir = path.resolve(BASE, `out/${utils.getOutDir(true)}/gen/node_headers`)
+  const nodeDir = path.resolve(BASE, `out/${utils.getOutDir({ shouldLog: true })}/gen/node_headers`)
   const env = Object.assign({}, process.env, {
     npm_config_nodedir: nodeDir,
     npm_config_msvs_version: '2019'

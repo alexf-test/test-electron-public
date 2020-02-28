@@ -31,13 +31,13 @@
 #include "content/public/browser/security_style_explanation.h"
 #include "content/public/browser/security_style_explanations.h"
 #include "printing/buildflags/buildflags.h"
-#include "shell/browser/atom_browser_client.h"
-#include "shell/browser/atom_browser_context.h"
+#include "shell/browser/electron_browser_client.h"
+#include "shell/browser/electron_browser_context.h"
 #include "shell/browser/native_window.h"
 #include "shell/browser/ui/file_dialog.h"
 #include "shell/browser/web_contents_preferences.h"
 #include "shell/browser/web_dialog_helper.h"
-#include "shell/common/atom_constants.h"
+#include "shell/common/electron_constants.h"
 #include "shell/common/options_switches.h"
 #include "storage/browser/file_system/isolated_context.h"
 
@@ -153,7 +153,7 @@ void AppendToFile(const base::FilePath& path, const std::string& content) {
 
 PrefService* GetPrefService(content::WebContents* web_contents) {
   auto* context = web_contents->GetBrowserContext();
-  return static_cast<electron::AtomBrowserContext*>(context)->prefs();
+  return static_cast<electron::ElectronBrowserContext*>(context)->prefs();
 }
 
 std::map<std::string, std::string> GetAddedFileSystemPaths(
@@ -191,7 +191,7 @@ CommonWebContentsDelegate::~CommonWebContentsDelegate() = default;
 
 void CommonWebContentsDelegate::InitWithWebContents(
     content::WebContents* web_contents,
-    AtomBrowserContext* browser_context,
+    ElectronBrowserContext* browser_context,
     bool is_guest) {
   browser_context_ = browser_context;
   web_contents->SetDelegate(this);
@@ -252,7 +252,7 @@ void CommonWebContentsDelegate::ResetManagedWebContents(bool async) {
     base::ThreadTaskRunnerHandle::Get()->PostNonNestableTask(
         FROM_HERE,
         base::BindOnce(
-            [](scoped_refptr<AtomBrowserContext> browser_context,
+            [](scoped_refptr<ElectronBrowserContext> browser_context,
                std::unique_ptr<InspectableWebContents> web_contents) {
               web_contents.reset();
             },
@@ -292,8 +292,21 @@ content::WebContents* CommonWebContentsDelegate::OpenURLFromTab(
   load_url_params.should_replace_current_entry =
       params.should_replace_current_entry;
   load_url_params.is_renderer_initiated = params.is_renderer_initiated;
+  load_url_params.started_from_context_menu = params.started_from_context_menu;
   load_url_params.initiator_origin = params.initiator_origin;
-  load_url_params.should_clear_history_list = true;
+  load_url_params.source_site_instance = params.source_site_instance;
+  load_url_params.frame_tree_node_id = params.frame_tree_node_id;
+  load_url_params.redirect_chain = params.redirect_chain;
+  load_url_params.has_user_gesture = params.user_gesture;
+  load_url_params.blob_url_loader_factory = params.blob_url_loader_factory;
+  load_url_params.href_translate = params.href_translate;
+  load_url_params.reload_type = params.reload_type;
+
+  if (params.post_data) {
+    load_url_params.load_type =
+        content::NavigationController::LOAD_TYPE_HTTP_POST;
+    load_url_params.post_data = params.post_data;
+  }
 
   source->GetController().LoadURLWithParams(load_url_params);
   return source;
@@ -347,6 +360,12 @@ void CommonWebContentsDelegate::EnterFullscreenModeForTab(
   }
   SetHtmlApiFullscreen(true);
   owner_window_->NotifyWindowEnterHtmlFullScreen();
+
+  if (native_fullscreen_) {
+    // Explicitly trigger a view resize, as the size is not actually changing if
+    // the browser is fullscreened, too.
+    source->GetRenderViewHost()->GetWidget()->SynchronizeVisualProperties();
+  }
 }
 
 void CommonWebContentsDelegate::ExitFullscreenModeForTab(
@@ -534,9 +553,7 @@ void CommonWebContentsDelegate::DevToolsIndexPath(
   std::unique_ptr<base::Value> parsed_excluded_folders =
       base::JSONReader::ReadDeprecated(excluded_folders_message);
   if (parsed_excluded_folders && parsed_excluded_folders->is_list()) {
-    const std::vector<base::Value>& folder_paths =
-        parsed_excluded_folders->GetList();
-    for (const base::Value& folder_path : folder_paths) {
+    for (const base::Value& folder_path : parsed_excluded_folders->GetList()) {
       if (folder_path.is_string())
         excluded_folders.push_back(folder_path.GetString());
     }

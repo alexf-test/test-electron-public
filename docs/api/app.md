@@ -34,10 +34,11 @@ Returns:
 
 * `launchInfo` unknown _macOS_
 
-Emitted when Electron has finished initializing. On macOS, `launchInfo` holds
-the `userInfo` of the `NSUserNotification` that was used to open the application,
-if it was launched from Notification Center. You can call `app.isReady()` to
-check if this event has already fired.
+Emitted once, when Electron has finished initializing. On macOS, `launchInfo`
+holds the `userInfo` of the `NSUserNotification` that was used to open the
+application, if it was launched from Notification Center. You can also call
+`app.isReady()` to check if this event has already fired and `app.whenReady()`
+to get a Promise that is fulfilled when Electron is initialized.
 
 ### Event: 'window-all-closed'
 
@@ -545,6 +546,7 @@ app.exit(0)
 ### `app.isReady()`
 
 Returns `Boolean` - `true` if Electron has finished initializing, `false` otherwise.
+See also `app.whenReady()`.
 
 ### `app.whenReady()`
 
@@ -701,34 +703,34 @@ Clears the recent documents list.
 
 ### `app.setAsDefaultProtocolClient(protocol[, path, args])`
 
-* `protocol` String - The name of your protocol, without `://`. If you want your
-  app to handle `electron://` links, call this method with `electron` as the
-  parameter.
-* `path` String (optional) _Windows_ - Defaults to `process.execPath`
-* `args` String[] (optional) _Windows_ - Defaults to an empty array
+* `protocol` String - The name of your protocol, without `://`. For example,
+  if you want your app to handle `electron://` links, call this method with
+  `electron` as the parameter.
+* `path` String (optional) _Windows_ - The path to the Electron executable.
+  Defaults to `process.execPath`
+* `args` String[] (optional) _Windows_ - Arguments passed to the executable.
+  Defaults to an empty array
 
 Returns `Boolean` - Whether the call succeeded.
 
-This method sets the current executable as the default handler for a protocol
-(aka URI scheme). It allows you to integrate your app deeper into the operating
-system. Once registered, all links with `your-protocol://` will be opened with
-the current executable. The whole link, including protocol, will be passed to
-your application as a parameter.
-
-On Windows, you can provide optional parameters path, the path to your executable,
-and args, an array of arguments to be passed to your executable when it launches.
+Sets the current executable as the default handler for a protocol (aka URI
+scheme). It allows you to integrate your app deeper into the operating system.
+Once registered, all links with `your-protocol://` will be opened with the
+current executable. The whole link, including protocol, will be passed to your
+application as a parameter.
 
 **Note:** On macOS, you can only register protocols that have been added to
-your app's `info.plist`, which can not be modified at runtime. You can however
-change the file with a simple text editor or script during build time.
-Please refer to [Apple's documentation][CFBundleURLTypes] for details.
+your app's `info.plist`, which cannot be modified at runtime. However, you can
+change the file during build time via [Electron Forge][electron-forge],
+[Electron Packager][electron-packager], or by editing `info.plist` with a text
+editor. Please refer to [Apple's documentation][CFBundleURLTypes] for details.
 
 **Note:** In a Windows Store environment (when packaged as an `appx`) this API
 will return `true` for all calls but the registry key it sets won't be accessible
 by other applications.  In order to register your Windows Store application
 as a default protocol handler you must [declare the protocol in your manifest](https://docs.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-uap-protocol).
 
-The API uses the Windows Registry and LSSetDefaultHandlerForURLScheme internally.
+The API uses the Windows Registry and `LSSetDefaultHandlerForURLScheme` internally.
 
 ### `app.removeAsDefaultProtocolClient(protocol[, path, args])` _macOS_ _Windows_
 
@@ -747,10 +749,8 @@ protocol (aka URI scheme). If so, it will remove the app as the default handler.
 * `path` String (optional) _Windows_ - Defaults to `process.execPath`
 * `args` String[] (optional) _Windows_ - Defaults to an empty array
 
-Returns `Boolean`
-
-This method checks if the current executable is the default handler for a protocol
-(aka URI scheme). If so, it will return true. Otherwise, it will return false.
+Returns `Boolean` - Whether the current executable is the default handler for a
+protocol (aka URI scheme).
 
 **Note:** On macOS, you can use this method to check if the app has been
 registered as the default protocol handler for a protocol. You can also verify
@@ -758,7 +758,7 @@ this by checking `~/Library/Preferences/com.apple.LaunchServices.plist` on the
 macOS machine. Please refer to
 [Apple's documentation][LSCopyDefaultHandlerForURLScheme] for details.
 
-The API uses the Windows Registry and LSCopyDefaultHandlerForURLScheme internally.
+The API uses the Windows Registry and `LSCopyDefaultHandlerForURLScheme` internally.
 
 ### `app.getApplicationNameForProtocol(url)`
 
@@ -935,7 +935,7 @@ if (!gotTheLock) {
   })
 
   // Create myWindow, load the rest of the app, etc...
-  app.on('ready', () => {
+  app.whenReady().then(() => {
   })
 }
 ```
@@ -991,6 +991,17 @@ Updates the current activity if its type matches `type`, merging the entries fro
 * `id` String
 
 Changes the [Application User Model ID][app-user-model-id] to `id`.
+
+### `app.setActivationPolicy(policy)` _macOS_
+
+* `policy` String - Can be 'regular', 'accessory', or 'prohibited'.
+
+Sets the activation policy for a given app.
+
+Activation policy types:
+* 'regular' - The application is an ordinary app that appears in the Dock and may have a user interface.
+* 'accessory' - The application doesn’t appear in the Dock and doesn’t have a menu bar, but it may be activated programmatically or by clicking on one of its windows.
+* 'prohibited' - The application doesn’t appear in the Dock and may not create windows or be activated.
 
 ### `app.importCertificate(options, callback)` _Linux_
 
@@ -1191,8 +1202,9 @@ Show the app's about panel options. These options can be overridden with `app.se
   * `website` String (optional) _Linux_ - The app's website.
   * `iconPath` String (optional) _Linux_ _Windows_ - Path to the app's icon. On Linux, will be shown as 64x64 pixels while retaining aspect ratio.
 
-Set the about panel options. This will override the values defined in the app's
-`.plist` file on MacOS. See the [Apple docs][about-panel-options] for more details. On Linux, values must be set in order to be shown; there are no defaults.
+Set the about panel options. This will override the values defined in the app's `.plist` file on MacOS. See the [Apple docs][about-panel-options] for more details. On Linux, values must be set in order to be shown; there are no defaults.
+
+If you do not set `credits` but still wish to surface them in your app, AppKit will look for a file named "Credits.html", "Credits.rtf", and "Credits.rtfd", in that order, in the bundle returned by the NSBundle class method main. The first file found is used, and if none is found, the info area is left blank. See Apple [documentation](https://developer.apple.com/documentation/appkit/nsaboutpaneloptioncredits?language=objc) for more information.
 
 ### `app.isEmojiPanelSupported()`
 
@@ -1313,6 +1325,8 @@ A `Boolean` property that returns  `true` if the app is packaged, `false` otherw
 [dock-menu]:https://developer.apple.com/macos/human-interface-guidelines/menus/dock-menus/
 [tasks]:https://msdn.microsoft.com/en-us/library/windows/desktop/dd378460(v=vs.85).aspx#tasks
 [app-user-model-id]: https://msdn.microsoft.com/en-us/library/windows/desktop/dd378459(v=vs.85).aspx
+[electron-forge]: https://www.electronforge.io/
+[electron-packager]: https://github.com/electron/electron-packager
 [CFBundleURLTypes]: https://developer.apple.com/library/ios/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html#//apple_ref/doc/uid/TP40009249-102207-TPXREF115
 [LSCopyDefaultHandlerForURLScheme]: https://developer.apple.com/library/mac/documentation/Carbon/Reference/LaunchServicesReference/#//apple_ref/c/func/LSCopyDefaultHandlerForURLScheme
 [handoff]: https://developer.apple.com/library/ios/documentation/UserExperience/Conceptual/Handoff/HandoffFundamentals/HandoffFundamentals.html

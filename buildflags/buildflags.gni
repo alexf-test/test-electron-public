@@ -14,15 +14,13 @@ declare_args() {
 
   enable_view_api = false
 
-  enable_pdf_viewer = false
+  enable_pdf_viewer = true
 
   enable_tts = true
 
   enable_color_chooser = true
 
   enable_picture_in_picture = true
-
-  enable_media_key_overrides = true
 
   # Provide a fake location provider for mocking
   # the geolocation responses. Disable it if you

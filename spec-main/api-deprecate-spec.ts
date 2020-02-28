@@ -2,9 +2,16 @@ import { expect } from 'chai'
 import { deprecate } from 'electron'
 
 describe('deprecate', () => {
+  let throwing: boolean
+
   beforeEach(() => {
+    throwing = process.throwDeprecation
     deprecate.setHandler(null)
     process.throwDeprecation = true
+  })
+
+  afterEach(() => {
+    process.throwDeprecation = throwing
   })
 
   it('allows a deprecation handler function to be specified', () => {
@@ -74,6 +81,30 @@ describe('deprecate', () => {
     expect(temp).to.equal(0)
     expect(msg).to.be.a('string')
     expect(msg).to.include(prop)
+  })
+
+  it('deprecates a property of an but retains the existing accessors and setters', () => {
+    let msg
+    deprecate.setHandler(m => { msg = m })
+
+    const prop = 'itMustGo'
+    let i = 1
+    const o = {
+      get itMustGo () {
+        return i
+      },
+      set itMustGo (thing) {
+        i = thing + 1
+      }
+    }
+
+    deprecate.removeProperty(o, prop)
+
+    expect(o[prop]).to.equal(1)
+    expect(msg).to.be.a('string')
+    expect(msg).to.include(prop)
+    o[prop] = 2
+    expect(o[prop]).to.equal(3)
   })
 
   it('warns exactly once when a function is deprecated with no replacement', () => {

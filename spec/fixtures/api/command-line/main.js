@@ -1,6 +1,6 @@
 const { app } = require('electron')
 
-app.on('ready', () => {
+app.whenReady().then(() => {
   const payload = {
     hasSwitch: app.commandLine.hasSwitch('foobar'),
     getSwitchValue: app.commandLine.getSwitchValue('foobar')
@@ -9,7 +9,5 @@ app.on('ready', () => {
   process.stdout.write(JSON.stringify(payload))
   process.stdout.end()
 
-  setImmediate(() => {
-    app.quit()
-  })
+  app.quit()
 })

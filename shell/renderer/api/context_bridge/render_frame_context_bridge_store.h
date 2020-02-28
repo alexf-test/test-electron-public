@@ -10,7 +10,7 @@
 
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_frame_observer.h"
-#include "shell/renderer/atom_render_frame_observer.h"
+#include "shell/renderer/electron_render_frame_observer.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 
 namespace electron {
@@ -50,6 +50,10 @@ class RenderFramePersistenceStore final : public content::RenderFrameObserver {
                           v8::Local<v8::Value> proxy_value);
   v8::MaybeLocal<v8::Value> GetCachedProxiedObject(v8::Local<v8::Value> from);
 
+  base::WeakPtr<RenderFramePersistenceStore> GetWeakPtr() {
+    return weak_factory_.GetWeakPtr();
+  }
+
  private:
   // func_id ==> { function, owning_context }
   std::map<size_t, FunctionContextPair> functions_;
@@ -58,10 +62,14 @@ class RenderFramePersistenceStore final : public content::RenderFrameObserver {
   // proxy maps are weak globals, i.e. these are not retained beyond
   // there normal JS lifetime.  You must check IsEmpty()
 
+  const int32_t routing_id_;
+
   // object_identity ==> [from_value, proxy_value]
   std::map<int, WeakGlobalPairNode*> proxy_map_;
   base::WeakPtrFactory<RenderFramePersistenceStore> weak_factory_{this};
 };
+
+std::map<int32_t, RenderFramePersistenceStore*>& GetStoreMap();
 
 }  // namespace context_bridge
 

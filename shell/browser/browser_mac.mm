@@ -14,9 +14,9 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "net/base/mac/url_conversions.h"
-#include "shell/browser/mac/atom_application.h"
-#include "shell/browser/mac/atom_application_delegate.h"
 #include "shell/browser/mac/dict_util.h"
+#include "shell/browser/mac/electron_application.h"
+#include "shell/browser/mac/electron_application_delegate.h"
 #include "shell/browser/native_window.h"
 #include "shell/browser/window_list.h"
 #include "shell/common/application_info.h"
@@ -362,9 +362,9 @@ v8::Local<v8::Promise> Browser::DockShow(v8::Isolate* isolate) {
   return handle;
 }
 
-void Browser::DockSetMenu(AtomMenuModel* model) {
-  AtomApplicationDelegate* delegate =
-      (AtomApplicationDelegate*)[NSApp delegate];
+void Browser::DockSetMenu(ElectronMenuModel* model) {
+  ElectronApplicationDelegate* delegate =
+      (ElectronApplicationDelegate*)[NSApp delegate];
   [delegate setApplicationDockMenu:model];
 }
 
@@ -377,11 +377,18 @@ void Browser::ShowAboutPanel() {
   NSDictionary* options = DictionaryValueToNSDictionary(about_panel_options_);
 
   // Credits must be a NSAttributedString instead of NSString
-  id credits = options[@"Credits"];
+  NSString* credits = (NSString*)options[@"Credits"];
   if (credits != nil) {
-    NSMutableDictionary* mutable_options = [options mutableCopy];
-    mutable_options[@"Credits"] = [[[NSAttributedString alloc]
-        initWithString:(NSString*)credits] autorelease];
+    base::scoped_nsobject<NSMutableDictionary> mutable_options(
+        [options mutableCopy]);
+    base::scoped_nsobject<NSAttributedString> creditString(
+        [[NSAttributedString alloc]
+            initWithString:credits
+                attributes:@{
+                  NSForegroundColorAttributeName : [NSColor textColor]
+                }]);
+
+    [mutable_options setValue:creditString forKey:@"Credits"];
     options = [NSDictionary dictionaryWithDictionary:mutable_options];
   }
 

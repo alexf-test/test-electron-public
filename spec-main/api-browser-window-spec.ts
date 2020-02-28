@@ -9,7 +9,7 @@ import { app, BrowserWindow, BrowserView, ipcMain, OnBeforeSendHeadersListenerDe
 
 import { emittedOnce } from './events-helpers'
 import { ifit, ifdescribe } from './spec-helpers'
-import { closeWindow } from './window-helpers'
+import { closeWindow, closeAllWindows } from './window-helpers'
 
 const fixtures = path.resolve(__dirname, '..', 'spec', 'fixtures')
 
@@ -37,12 +37,6 @@ const expectBoundsEqual = (actual: any, expected: any) => {
   }
 }
 
-const closeAllWindows = async () => {
-  for (const w of BrowserWindow.getAllWindows()) {
-    await closeWindow(w, { assertNotWindows: false })
-  }
-}
-
 describe('BrowserWindow module', () => {
   describe('BrowserWindow constructor', () => {
     it('allows passing void 0 as the webContents', async () => {
@@ -55,6 +49,28 @@ describe('BrowserWindow module', () => {
         } as any)
         w.destroy()
       }).not.to.throw()
+    })
+  })
+
+  describe('garbage collection', () => {
+    const v8Util = process.electronBinding('v8_util')
+    afterEach(closeAllWindows)
+
+    it('window does not get garbage collected when opened', (done) => {
+      const w = new BrowserWindow({ show: false })
+      // Keep a weak reference to the window.
+      const map = v8Util.createIDWeakMap<Electron.BrowserWindow>()
+      map.set(0, w)
+      setTimeout(() => {
+        // Do garbage collection, since |w| is not referenced in this closure
+        // it would be gone after next call if there is no other reference.
+        v8Util.requestGarbageCollectionForTesting()
+
+        setTimeout(() => {
+          expect(map.has(0)).to.equal(true)
+          done()
+        })
+      })
     })
   })
 
@@ -418,110 +434,168 @@ describe('BrowserWindow module', () => {
     })
   })
 
-  describe('navigation events', () => {
-    let w = null as unknown as BrowserWindow
-    beforeEach(() => {
-      w = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: true } })
+  for (const sandbox of [false, true]) {
+    describe(`navigation events${sandbox ? ' with sandbox' : ''}`, () => {
+      let w = null as unknown as BrowserWindow
+      beforeEach(() => {
+        w = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: false, sandbox } })
+      })
+      afterEach(async () => {
+        await closeWindow(w)
+        w = null as unknown as BrowserWindow
+      })
+
+      describe('will-navigate event', () => {
+        let server = null as unknown as http.Server
+        let url = null as unknown as string
+        before((done) => {
+          server = http.createServer((req, res) => { res.end('') })
+          server.listen(0, '127.0.0.1', () => {
+            url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`
+            done()
+          })
+        })
+
+        after(() => {
+          server.close()
+        })
+
+        it('allows the window to be closed from the event listener', (done) => {
+          w.webContents.once('will-navigate', () => {
+            w.close()
+            done()
+          })
+          w.loadFile(path.join(fixtures, 'pages', 'will-navigate.html'))
+        })
+
+        it('can be prevented', (done) => {
+          let willNavigate = false
+          w.webContents.once('will-navigate', (e) => {
+            willNavigate = true
+            e.preventDefault()
+          })
+          w.webContents.on('did-stop-loading', () => {
+            if (willNavigate) {
+              // i.e. it shouldn't have had '?navigated' appended to it.
+              expect(w.webContents.getURL().endsWith('will-navigate.html')).to.be.true()
+              done()
+            }
+          })
+          w.loadFile(path.join(fixtures, 'pages', 'will-navigate.html'))
+        })
+
+        it('is triggered when navigating from file: to http:', async () => {
+          await w.loadFile(path.join(fixtures, 'api', 'blank.html'))
+          w.webContents.executeJavaScript(`location.href = ${JSON.stringify(url)}`)
+          const navigatedTo = await new Promise(resolve => {
+            w.webContents.once('will-navigate', (e, url) => {
+              e.preventDefault()
+              resolve(url)
+            })
+          })
+          expect(navigatedTo).to.equal(url)
+          expect(w.webContents.getURL()).to.match(/^file:/)
+        })
+
+        it('is triggered when navigating from about:blank to http:', async () => {
+          await w.loadURL('about:blank')
+          w.webContents.executeJavaScript(`location.href = ${JSON.stringify(url)}`)
+          const navigatedTo = await new Promise(resolve => {
+            w.webContents.once('will-navigate', (e, url) => {
+              e.preventDefault()
+              resolve(url)
+            })
+          })
+          expect(navigatedTo).to.equal(url)
+          expect(w.webContents.getURL()).to.equal('about:blank')
+        })
+      })
+
+      describe('will-redirect event', () => {
+        let server = null as unknown as http.Server
+        let url = null as unknown as string
+        before((done) => {
+          server = http.createServer((req, res) => {
+            if (req.url === '/302') {
+              res.setHeader('Location', '/200')
+              res.statusCode = 302
+              res.end()
+            } else if (req.url === '/navigate-302') {
+              res.end(`<html><body><script>window.location='${url}/302'</script></body></html>`)
+            } else {
+              res.end()
+            }
+          })
+          server.listen(0, '127.0.0.1', () => {
+            url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+            done()
+          })
+        })
+
+        after(() => {
+          server.close()
+        })
+        it('is emitted on redirects', (done) => {
+          w.webContents.on('will-redirect', () => {
+            done()
+          })
+          w.loadURL(`${url}/302`)
+        })
+
+        it('is emitted after will-navigate on redirects', (done) => {
+          let navigateCalled = false
+          w.webContents.on('will-navigate', () => {
+            navigateCalled = true
+          })
+          w.webContents.on('will-redirect', () => {
+            expect(navigateCalled).to.equal(true, 'should have called will-navigate first')
+            done()
+          })
+          w.loadURL(`${url}/navigate-302`)
+        })
+
+        it('is emitted before did-stop-loading on redirects', (done) => {
+          let stopCalled = false
+          w.webContents.on('did-stop-loading', () => {
+            stopCalled = true
+          })
+          w.webContents.on('will-redirect', () => {
+            expect(stopCalled).to.equal(false, 'should not have called did-stop-loading first')
+            done()
+          })
+          w.loadURL(`${url}/302`)
+        })
+
+        it('allows the window to be closed from the event listener', (done) => {
+          w.webContents.once('will-redirect', () => {
+            w.close()
+            done()
+          })
+          w.loadURL(`${url}/302`)
+        })
+
+        it('can be prevented', (done) => {
+          w.webContents.once('will-redirect', (event) => {
+            event.preventDefault()
+          })
+          w.webContents.on('will-navigate', (e, u) => {
+            expect(u).to.equal(`${url}/302`)
+          })
+          w.webContents.on('did-stop-loading', () => {
+            expect(w.webContents.getURL()).to.equal(
+              `${url}/navigate-302`,
+              'url should not have changed after navigation event'
+            )
+            done()
+          })
+          w.webContents.on('will-redirect', (e, u) => {
+            expect(u).to.equal(`${url}/200`)
+          })
+          w.loadURL(`${url}/navigate-302`)
+        })
+      })
     })
-    afterEach(async () => {
-      await closeWindow(w)
-      w = null as unknown as BrowserWindow
-    })
-
-    describe('will-navigate event', () => {
-      it('allows the window to be closed from the event listener', (done) => {
-        w.webContents.once('will-navigate', () => {
-          w.close()
-          done()
-        })
-        w.loadFile(path.join(fixtures, 'pages', 'will-navigate.html'))
-      })
-    })
-
-    describe('will-redirect event', () => {
-      let server = null as unknown as http.Server
-      let url = null as unknown as string
-      before((done) => {
-        server = http.createServer((req, res) => {
-          if (req.url === '/302') {
-            res.setHeader('Location', '/200')
-            res.statusCode = 302
-            res.end()
-          } else if (req.url === '/navigate-302') {
-            res.end(`<html><body><script>window.location='${url}/302'</script></body></html>`)
-          } else {
-            res.end()
-          }
-        })
-        server.listen(0, '127.0.0.1', () => {
-          url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-          done()
-        })
-      })
-
-      after(() => {
-        server.close()
-      })
-      it('is emitted on redirects', (done) => {
-        w.webContents.on('will-redirect', () => {
-          done()
-        })
-        w.loadURL(`${url}/302`)
-      })
-
-      it('is emitted after will-navigate on redirects', (done) => {
-        let navigateCalled = false
-        w.webContents.on('will-navigate', () => {
-          navigateCalled = true
-        })
-        w.webContents.on('will-redirect', () => {
-          expect(navigateCalled).to.equal(true, 'should have called will-navigate first')
-          done()
-        })
-        w.loadURL(`${url}/navigate-302`)
-      })
-
-      it('is emitted before did-stop-loading on redirects', (done) => {
-        let stopCalled = false
-        w.webContents.on('did-stop-loading', () => {
-          stopCalled = true
-        })
-        w.webContents.on('will-redirect', () => {
-          expect(stopCalled).to.equal(false, 'should not have called did-stop-loading first')
-          done()
-        })
-        w.loadURL(`${url}/302`)
-      })
-
-      it('allows the window to be closed from the event listener', (done) => {
-        w.webContents.once('will-redirect', () => {
-          w.close()
-          done()
-        })
-        w.loadURL(`${url}/302`)
-      })
-
-      it('can be prevented', (done) => {
-        w.webContents.once('will-redirect', (event) => {
-          event.preventDefault()
-        })
-        w.webContents.on('will-navigate', (e, u) => {
-          expect(u).to.equal(`${url}/302`)
-        })
-        w.webContents.on('did-stop-loading', () => {
-          expect(w.webContents.getURL()).to.equal(
-            `${url}/navigate-302`,
-            'url should not have changed after navigation event'
-          )
-          done()
-        })
-        w.webContents.on('will-redirect', (e, u) => {
-          expect(u).to.equal(`${url}/200`)
-        })
-        w.loadURL(`${url}/navigate-302`)
-      })
-    })
-  })
+  }
 
   describe('focus and visibility', () => {
     let w = null as unknown as BrowserWindow
@@ -595,13 +669,11 @@ describe('BrowserWindow module', () => {
     })
 
     describe('BrowserWindow.getFocusedWindow()', () => {
-      it('returns the opener window when dev tools window is focused', (done) => {
+      it('returns the opener window when dev tools window is focused', async () => {
         w.show()
-        w.webContents.once('devtools-focused', () => {
-          expect(BrowserWindow.getFocusedWindow()).to.equal(w)
-          done()
-        })
         w.webContents.openDevTools({ mode: 'undocked' })
+        await emittedOnce(w.webContents, 'devtools-focused')
+        expect(BrowserWindow.getFocusedWindow()).to.equal(w)
       })
     })
 
@@ -686,6 +758,17 @@ describe('BrowserWindow module', () => {
           w.moveAbove(w2.getMediaSourceId())
         }).to.not.throw()
 
+        await closeWindow(w2, { assertNotWindows: false })
+      })
+    })
+
+    describe('BrowserWindow.setFocusable()', () => {
+      it('can set unfocusable window to focusable', async () => {
+        const w2 = new BrowserWindow({ focusable: false })
+        const w2Focused = emittedOnce(w2, 'focus')
+        w2.setFocusable(true)
+        w2.focus()
+        await w2Focused
         await closeWindow(w2, { assertNotWindows: false })
       })
     })
@@ -831,6 +914,29 @@ describe('BrowserWindow module', () => {
           })
         })
         w.setContentBounds(bounds)
+      })
+    })
+
+    describe('BrowserWindow.getBackgroundColor()', () => {
+      it('returns default value if no backgroundColor is set', () => {
+        w.destroy()
+        w = new BrowserWindow({})
+        expect(w.getBackgroundColor()).to.equal('#FFFFFF')
+      })
+      it('returns correct value if backgroundColor is set', () => {
+        const backgroundColor = '#BBAAFF'
+        w.destroy()
+        w = new BrowserWindow({
+          backgroundColor: backgroundColor
+        })
+        expect(w.getBackgroundColor()).to.equal(backgroundColor)
+      })
+      it('returns correct value from setBackgroundColor()', () => {
+        const backgroundColor = '#AABBFF'
+        w.destroy()
+        w = new BrowserWindow({})
+        w.setBackgroundColor(backgroundColor)
+        expect(w.getBackgroundColor()).to.equal(backgroundColor)
       })
     })
 
@@ -1596,6 +1702,7 @@ describe('BrowserWindow module', () => {
           show: false,
           webPreferences: {
             nodeIntegration: true,
+            enableRemoteModule: true,
             preload
           }
         })
@@ -1717,7 +1824,7 @@ describe('BrowserWindow module', () => {
         describe(description, () => {
           const preload = path.join(__dirname, 'fixtures', 'module', 'preload-remote.js')
 
-          it('enables the remote module by default', async () => {
+          it('disables the remote module by default', async () => {
             const w = new BrowserWindow({
               show: false,
               webPreferences: {
@@ -1728,7 +1835,7 @@ describe('BrowserWindow module', () => {
             const p = emittedOnce(ipcMain, 'remote')
             w.loadFile(path.join(fixtures, 'api', 'blank.html'))
             const [, remote] = await p
-            expect(remote).to.equal('object')
+            expect(remote).to.equal('undefined')
           })
 
           it('disables the remote module when false', async () => {
@@ -1744,6 +1851,21 @@ describe('BrowserWindow module', () => {
             w.loadFile(path.join(fixtures, 'api', 'blank.html'))
             const [, remote] = await p
             expect(remote).to.equal('undefined')
+          })
+
+          it('enables the remote module when true', async () => {
+            const w = new BrowserWindow({
+              show: false,
+              webPreferences: {
+                preload,
+                sandbox,
+                enableRemoteModule: true
+              }
+            })
+            const p = emittedOnce(ipcMain, 'remote')
+            w.loadFile(path.join(fixtures, 'api', 'blank.html'))
+            const [, remote] = await p
+            expect(remote).to.equal('object')
           })
         })
       }
@@ -2024,8 +2146,7 @@ describe('BrowserWindow module', () => {
             'did-finish-load',
             'did-frame-finish-load',
             'did-navigate-in-page',
-            // TODO(nornagon): sandboxed pages should also emit will-navigate
-            // 'will-navigate',
+            'will-navigate',
             'did-start-loading',
             'did-stop-loading',
             'did-frame-finish-load',
@@ -2061,7 +2182,8 @@ describe('BrowserWindow module', () => {
           show: false,
           webPreferences: {
             preload,
-            sandbox: true
+            sandbox: true,
+            enableRemoteModule: true
           }
         })
         w.loadFile(path.join(__dirname, 'fixtures', 'api', 'sandbox.html'), { search: 'reload-remote' })
@@ -2093,7 +2215,8 @@ describe('BrowserWindow module', () => {
           show: false,
           webPreferences: {
             preload,
-            sandbox: true
+            sandbox: true,
+            enableRemoteModule: true
           }
         })
         w.webContents.once('new-window', (event, url, frameName, disposition, options) => {
@@ -2282,18 +2405,6 @@ describe('BrowserWindow module', () => {
         ])
         const webPreferences = (childWebContents as any).getLastWebPreferences()
         expect(webPreferences.foo).to.equal('bar')
-      })
-      it('should have nodeIntegration disabled in child windows', async () => {
-        const w = new BrowserWindow({
-          show: false,
-          webPreferences: {
-            nodeIntegration: true,
-            nativeWindowOpen: true
-          }
-        })
-        w.loadFile(path.join(fixtures, 'api', 'native-window-open-argv.html'))
-        const [, typeofProcess] = await emittedOnce(ipcMain, 'answer')
-        expect(typeofProcess).to.eql('undefined')
       })
 
       describe('window.location', () => {
@@ -2836,6 +2947,13 @@ describe('BrowserWindow module', () => {
       w.minimize()
       w.restore()
       expectBoundsEqual(w.getSize(), initialSize)
+    })
+
+    it('does not crash when restoring hidden minimized window', () => {
+      const w = new BrowserWindow({})
+      w.minimize()
+      w.hide()
+      w.show()
     })
   })
 
@@ -3536,201 +3654,6 @@ describe('BrowserWindow module', () => {
       // https://github.com/electron/node-is-valid-window
       const isValidWindow = require('is-valid-window')
       expect(isValidWindow(w.getNativeWindowHandle())).to.be.true('is valid window')
-    })
-  })
-
-  describe('extensions and dev tools extensions', () => {
-    let showPanelTimeoutId: NodeJS.Timeout | null = null
-
-    const showLastDevToolsPanel = (w: BrowserWindow) => {
-      w.webContents.once('devtools-opened', () => {
-        const show = () => {
-          if (w == null || w.isDestroyed()) return
-          const { devToolsWebContents } = w as unknown as { devToolsWebContents: WebContents | undefined }
-          if (devToolsWebContents == null || devToolsWebContents.isDestroyed()) {
-            return
-          }
-
-          const showLastPanel = () => {
-            // this is executed in the devtools context, where UI is a global
-            const { UI } = (window as any)
-            const lastPanelId = UI.inspectorView._tabbedPane._tabs.peekLast().id
-            UI.inspectorView.showPanel(lastPanelId)
-          }
-          devToolsWebContents.executeJavaScript(`(${showLastPanel})()`, false).then(() => {
-            showPanelTimeoutId = setTimeout(show, 100)
-          })
-        }
-        showPanelTimeoutId = setTimeout(show, 100)
-      })
-    }
-
-    afterEach(() => {
-      if (showPanelTimeoutId != null) {
-        clearTimeout(showPanelTimeoutId)
-        showPanelTimeoutId = null
-      }
-    })
-
-    describe('BrowserWindow.addDevToolsExtension', () => {
-      describe('for invalid extensions', () => {
-        it('throws errors for missing manifest.json files', () => {
-          const nonexistentExtensionPath = path.join(__dirname, 'does-not-exist')
-          expect(() => {
-            BrowserWindow.addDevToolsExtension(nonexistentExtensionPath)
-          }).to.throw(/ENOENT: no such file or directory/)
-        })
-
-        it('throws errors for invalid manifest.json files', () => {
-          const badManifestExtensionPath = path.join(fixtures, 'devtools-extensions', 'bad-manifest')
-          expect(() => {
-            BrowserWindow.addDevToolsExtension(badManifestExtensionPath)
-          }).to.throw(/Unexpected token }/)
-        })
-      })
-
-      describe('for a valid extension', () => {
-        const extensionName = 'foo'
-
-        before(() => {
-          const extensionPath = path.join(fixtures, 'devtools-extensions', 'foo')
-          BrowserWindow.addDevToolsExtension(extensionPath)
-          expect(BrowserWindow.getDevToolsExtensions()).to.have.property(extensionName)
-        })
-
-        after(() => {
-          BrowserWindow.removeDevToolsExtension('foo')
-          expect(BrowserWindow.getDevToolsExtensions()).to.not.have.property(extensionName)
-        })
-
-        describe('when the devtools is docked', () => {
-          let message: any
-          let w: BrowserWindow
-          before(async () => {
-            w = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: true } })
-            const p = new Promise(resolve => ipcMain.once('answer', (event, message) => {
-              resolve(message)
-            }))
-            showLastDevToolsPanel(w)
-            w.loadURL('about:blank')
-            w.webContents.openDevTools({ mode: 'bottom' })
-            message = await p
-          })
-          after(closeAllWindows)
-
-          describe('created extension info', function () {
-            it('has proper "runtimeId"', async function () {
-              expect(message).to.have.ownProperty('runtimeId')
-              expect(message.runtimeId).to.equal(extensionName)
-            })
-            it('has "tabId" matching webContents id', function () {
-              expect(message).to.have.ownProperty('tabId')
-              expect(message.tabId).to.equal(w.webContents.id)
-            })
-            it('has "i18nString" with proper contents', function () {
-              expect(message).to.have.ownProperty('i18nString')
-              expect(message.i18nString).to.equal('foo - bar (baz)')
-            })
-            it('has "storageItems" with proper contents', function () {
-              expect(message).to.have.ownProperty('storageItems')
-              expect(message.storageItems).to.deep.equal({
-                local: {
-                  set: { hello: 'world', world: 'hello' },
-                  remove: { world: 'hello' },
-                  clear: {}
-                },
-                sync: {
-                  set: { foo: 'bar', bar: 'foo' },
-                  remove: { foo: 'bar' },
-                  clear: {}
-                }
-              })
-            })
-          })
-        })
-
-        describe('when the devtools is undocked', () => {
-          let message: any
-          let w: BrowserWindow
-          before(async () => {
-            w = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: true } })
-            showLastDevToolsPanel(w)
-            w.loadURL('about:blank')
-            w.webContents.openDevTools({ mode: 'undocked' })
-            message = await new Promise(resolve => ipcMain.once('answer', (event, message) => {
-              resolve(message)
-            }))
-          })
-          after(closeAllWindows)
-
-          describe('created extension info', function () {
-            it('has proper "runtimeId"', function () {
-              expect(message).to.have.ownProperty('runtimeId')
-              expect(message.runtimeId).to.equal(extensionName)
-            })
-            it('has "tabId" matching webContents id', function () {
-              expect(message).to.have.ownProperty('tabId')
-              expect(message.tabId).to.equal(w.webContents.id)
-            })
-          })
-        })
-      })
-    })
-
-    it('works when used with partitions', async () => {
-      const w = new BrowserWindow({
-        show: false,
-        webPreferences: {
-          nodeIntegration: true,
-          partition: 'temp'
-        }
-      })
-
-      const extensionPath = path.join(fixtures, 'devtools-extensions', 'foo')
-      BrowserWindow.addDevToolsExtension(extensionPath)
-      try {
-        showLastDevToolsPanel(w)
-
-        const p: Promise<any> = new Promise(resolve => ipcMain.once('answer', function (event, message) {
-          resolve(message)
-        }))
-
-        w.loadURL('about:blank')
-        w.webContents.openDevTools({ mode: 'bottom' })
-        const message = await p
-        expect(message.runtimeId).to.equal('foo')
-      } finally {
-        BrowserWindow.removeDevToolsExtension('foo')
-        await closeAllWindows()
-      }
-    })
-
-    it('serializes the registered extensions on quit', () => {
-      const extensionName = 'foo'
-      const extensionPath = path.join(fixtures, 'devtools-extensions', extensionName)
-      const serializedPath = path.join(app.getPath('userData'), 'DevTools Extensions')
-
-      BrowserWindow.addDevToolsExtension(extensionPath)
-      app.emit('will-quit')
-      expect(JSON.parse(fs.readFileSync(serializedPath, 'utf8'))).to.deep.equal([extensionPath])
-
-      BrowserWindow.removeDevToolsExtension(extensionName)
-      app.emit('will-quit')
-      expect(fs.existsSync(serializedPath)).to.be.false('file exists')
-    })
-
-    describe('BrowserWindow.addExtension', () => {
-      it('throws errors for missing manifest.json files', () => {
-        expect(() => {
-          BrowserWindow.addExtension(path.join(__dirname, 'does-not-exist'))
-        }).to.throw('ENOENT: no such file or directory')
-      })
-
-      it('throws errors for invalid manifest.json files', () => {
-        expect(() => {
-          BrowserWindow.addExtension(path.join(fixtures, 'devtools-extensions', 'bad-manifest'))
-        }).to.throw('Unexpected token }')
-      })
     })
   })
 

@@ -234,7 +234,7 @@ describe('session module', () => {
           )
 
           appProcess.stdout.on('data', data => { output += data })
-          appProcess.stdout.on('end', () => {
+          appProcess.on('exit', () => {
             resolve(output.replace(/(\r\n|\n|\r)/gm, ''))
           })
         })
@@ -526,7 +526,7 @@ describe('session module', () => {
     })
   })
 
-  describe('ses.clearAuthCache(options)', () => {
+  describe('ses.clearAuthCache()', () => {
     it('can clear http auth info from cache', async () => {
       const ses = session.fromPartition('auth-cache')
       const server = http.createServer((req, res) => {
@@ -569,7 +569,7 @@ describe('session module', () => {
       expect(await fetch(`http://test:test@127.0.0.1:${port}`)).to.equal('authenticated')
       // subsequently, the credentials are cached
       expect(await fetch(`http://127.0.0.1:${port}`)).to.equal('authenticated')
-      await ses.clearAuthCache({ type: 'password' })
+      await ses.clearAuthCache()
       // once the cache is cleared, we should get an error again
       await expect(fetch(`http://127.0.0.1:${port}`)).to.eventually.be.rejected()
     })

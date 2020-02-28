@@ -58,6 +58,10 @@ A [`typeof TouchBarSlider`](./touch-bar-slider.md) reference to the `TouchBarSli
 
 A [`typeof TouchBarSpacer`](./touch-bar-spacer.md) reference to the `TouchBarSpacer` class.
 
+#### `TouchBarOtherItemsProxy`
+
+A [`typeof TouchBarOtherItemsProxy`](./touch-bar-other-items-proxy.md) reference to the `TouchBarOtherItemsProxy` class.
+
 ### Instance Properties
 
 The following properties are available on instances of `TouchBar`:
@@ -166,7 +170,7 @@ const touchBar = new TouchBar({
 
 let window
 
-app.once('ready', () => {
+app.whenReady().then(() => {
   window = new BrowserWindow({
     frame: false,
     titleBarStyle: 'hiddenInset',

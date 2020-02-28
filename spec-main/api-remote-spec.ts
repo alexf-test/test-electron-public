@@ -48,11 +48,12 @@ function makeWindow () {
   before(async () => {
     w = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: true, enableRemoteModule: true } })
     await w.loadURL('about:blank')
-    await w.webContents.executeJavaScript(`
+    await w.webContents.executeJavaScript(`{
       const chai_1 = window.chai_1 = require('chai')
       chai_1.use(require('chai-as-promised'))
       chai_1.use(require('dirty-chai'))
-    `)
+      null
+    }`)
   })
   after(closeAllWindows)
   return () => w
@@ -63,11 +64,12 @@ function makeEachWindow () {
   beforeEach(async () => {
     w = new BrowserWindow({ show: false, webPreferences: { nodeIntegration: true, enableRemoteModule: true } })
     await w.loadURL('about:blank')
-    await w.webContents.executeJavaScript(`
+    await w.webContents.executeJavaScript(`{
       const chai_1 = window.chai_1 = require('chai')
       chai_1.use(require('chai-as-promised'))
       chai_1.use(require('dirty-chai'))
-    `)
+      null
+    }`)
   })
   afterEach(closeAllWindows)
   return () => w
@@ -192,7 +194,8 @@ ifdescribe(features.isRemoteModuleEnabled())('remote module', () => {
       const w = new BrowserWindow({
         show: false,
         webPreferences: {
-          preload
+          preload,
+          enableRemoteModule: true
         }
       })
       w.loadURL('about:blank')
@@ -205,7 +208,8 @@ ifdescribe(features.isRemoteModuleEnabled())('remote module', () => {
       const w = new BrowserWindow({
         show: false,
         webPreferences: {
-          nodeIntegration: true
+          nodeIntegration: true,
+          enableRemoteModule: true
         }
       })
 
@@ -225,7 +229,8 @@ ifdescribe(features.isRemoteModuleEnabled())('remote module', () => {
       const w = new BrowserWindow({
         show: false,
         webPreferences: {
-          nodeIntegration: true
+          nodeIntegration: true,
+          enableRemoteModule: true
         }
       })
       await w.loadFile(path.join(fixtures, 'api', 'remote-event-handler.html'))
@@ -241,9 +246,17 @@ ifdescribe(features.isRemoteModuleEnabled())('remote module', () => {
       expect(w.webContents.listenerCount('remote-handler')).to.equal(2)
       let warnMessage: string | null = null
       const originalWarn = console.warn
+      let warned: Function
+      const warnPromise = new Promise(resolve => {
+        warned = resolve
+      })
       try {
-        console.warn = (message: string) => { warnMessage = message }
+        console.warn = (message: string) => {
+          warnMessage = message
+          warned()
+        }
         w.webContents.emit('remote-handler', { sender: w.webContents })
+        await warnPromise
       } finally {
         console.warn = originalWarn
       }

@@ -47,9 +47,11 @@ class CachedProxyLifeMonitor final : public ObjectLifeMonitor {
     }
     if (node_->prev) {
       node_->prev->next = node_->next;
+      node_->prev = nullptr;
     }
     if (node_->next) {
       node_->next->prev = node_->prev;
+      node_->next = nullptr;
     }
     if (!node_->prev && !node_->next) {
       // Must be a single length linked list
@@ -66,23 +68,27 @@ class CachedProxyLifeMonitor final : public ObjectLifeMonitor {
 
 }  // namespace
 
+std::map<int32_t, RenderFramePersistenceStore*>& GetStoreMap() {
+  static base::NoDestructor<std::map<int32_t, RenderFramePersistenceStore*>>
+      store_map;
+  return *store_map;
+}
+
 WeakGlobalPairNode::WeakGlobalPairNode(WeakGlobalPair pair) {
   this->pair = std::move(pair);
 }
 
-WeakGlobalPairNode::~WeakGlobalPairNode() {
-  if (next) {
-    delete next;
-  }
-}
+WeakGlobalPairNode::~WeakGlobalPairNode() {}
 
 RenderFramePersistenceStore::RenderFramePersistenceStore(
     content::RenderFrame* render_frame)
-    : content::RenderFrameObserver(render_frame) {}
+    : content::RenderFrameObserver(render_frame),
+      routing_id_(render_frame->GetRoutingID()) {}
 
 RenderFramePersistenceStore::~RenderFramePersistenceStore() = default;
 
 void RenderFramePersistenceStore::OnDestruct() {
+  GetStoreMap().erase(routing_id_);
   delete this;
 }
 

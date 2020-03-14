@@ -4,6 +4,7 @@
 
 #include "shell/browser/api/electron_api_web_contents.h"
 
+#include <limits>
 #include <memory>
 #include <set>
 #include <string>
@@ -2489,7 +2490,13 @@ double WebContents::GetZoomLevel() const {
   return zoom_controller_->GetZoomLevel();
 }
 
-void WebContents::SetZoomFactor(double factor) {
+void WebContents::SetZoomFactor(gin_helper::ErrorThrower thrower,
+                                double factor) {
+  if (factor < std::numeric_limits<double>::epsilon()) {
+    thrower.ThrowError("'zoomFactor' must be a double greater than 0.0");
+    return;
+  }
+
   auto level = blink::PageZoomFactorToZoomLevel(factor);
   SetZoomLevel(level);
 }
@@ -2679,10 +2686,8 @@ void WebContents::BuildPrototype(v8::Isolate* isolate,
       .SetMethod("_goForward", &WebContents::GoForward)
       .SetMethod("_goToOffset", &WebContents::GoToOffset)
       .SetMethod("isCrashed", &WebContents::IsCrashed)
-      .SetMethod("_setUserAgent", &WebContents::SetUserAgent)
-      .SetMethod("_getUserAgent", &WebContents::GetUserAgent)
-      .SetProperty("userAgent", &WebContents::GetUserAgent,
-                   &WebContents::SetUserAgent)
+      .SetMethod("setUserAgent", &WebContents::SetUserAgent)
+      .SetMethod("getUserAgent", &WebContents::GetUserAgent)
       .SetMethod("savePage", &WebContents::SavePage)
       .SetMethod("openDevTools", &WebContents::OpenDevTools)
       .SetMethod("closeDevTools", &WebContents::CloseDevTools)
@@ -2693,10 +2698,8 @@ void WebContents::BuildPrototype(v8::Isolate* isolate,
       .SetMethod("toggleDevTools", &WebContents::ToggleDevTools)
       .SetMethod("inspectElement", &WebContents::InspectElement)
       .SetMethod("setIgnoreMenuShortcuts", &WebContents::SetIgnoreMenuShortcuts)
-      .SetMethod("_setAudioMuted", &WebContents::SetAudioMuted)
-      .SetMethod("_isAudioMuted", &WebContents::IsAudioMuted)
-      .SetProperty("audioMuted", &WebContents::IsAudioMuted,
-                   &WebContents::SetAudioMuted)
+      .SetMethod("setAudioMuted", &WebContents::SetAudioMuted)
+      .SetMethod("isAudioMuted", &WebContents::IsAudioMuted)
       .SetMethod("isCurrentlyAudible", &WebContents::IsCurrentlyAudible)
       .SetMethod("undo", &WebContents::Undo)
       .SetMethod("redo", &WebContents::Redo)
@@ -2728,20 +2731,14 @@ void WebContents::BuildPrototype(v8::Isolate* isolate,
       .SetMethod("startPainting", &WebContents::StartPainting)
       .SetMethod("stopPainting", &WebContents::StopPainting)
       .SetMethod("isPainting", &WebContents::IsPainting)
-      .SetMethod("_setFrameRate", &WebContents::SetFrameRate)
-      .SetMethod("_getFrameRate", &WebContents::GetFrameRate)
-      .SetProperty("frameRate", &WebContents::GetFrameRate,
-                   &WebContents::SetFrameRate)
+      .SetMethod("setFrameRate", &WebContents::SetFrameRate)
+      .SetMethod("getFrameRate", &WebContents::GetFrameRate)
 #endif
       .SetMethod("invalidate", &WebContents::Invalidate)
-      .SetMethod("_setZoomLevel", &WebContents::SetZoomLevel)
-      .SetMethod("_getZoomLevel", &WebContents::GetZoomLevel)
-      .SetProperty("zoomLevel", &WebContents::GetZoomLevel,
-                   &WebContents::SetZoomLevel)
-      .SetMethod("_setZoomFactor", &WebContents::SetZoomFactor)
-      .SetMethod("_getZoomFactor", &WebContents::GetZoomFactor)
-      .SetProperty("zoomFactor", &WebContents::GetZoomFactor,
-                   &WebContents::SetZoomFactor)
+      .SetMethod("setZoomLevel", &WebContents::SetZoomLevel)
+      .SetMethod("getZoomLevel", &WebContents::GetZoomLevel)
+      .SetMethod("setZoomFactor", &WebContents::SetZoomFactor)
+      .SetMethod("getZoomFactor", &WebContents::GetZoomFactor)
       .SetMethod("getType", &WebContents::GetType)
       .SetMethod("_getPreloadPaths", &WebContents::GetPreloadPaths)
       .SetMethod("getWebPreferences", &WebContents::GetWebPreferences)

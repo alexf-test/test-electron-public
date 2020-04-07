@@ -12,12 +12,5 @@ jobs:
         submodules: recursive
     - uses: Anthophila/codeql-action/codeql/init@master
       with:
-        languages: javascript
+        languages: javascript,python
     - uses: Anthophila/codeql-action/codeql/finish@master
-      with:
-        results_folder: ../codeql_results/sarif
-    - uses: Anthophila/codeql-action/codeql/upload-sarif@master
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        sarif_folder: ../codeql_results/sarif

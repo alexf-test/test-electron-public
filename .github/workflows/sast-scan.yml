@@ -1,0 +1,20 @@
+ 
+name: "Sast-scan analysis"
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: recursive
+    - uses: AppThreat/sast-scan-action@master
+      with:
+        type: python,credscan
+      continue-on-error: true
+    - uses: Anthophila/codeql-action/codeql/upload-sarif@master
+      with:
+        sarif_file: reports

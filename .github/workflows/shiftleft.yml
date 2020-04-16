@@ -2,9 +2,6 @@ name: ShiftLeft Scan
 
 on:
   push:
-    branches:
-      - master
-      - feature/*
 
 jobs:
   build:

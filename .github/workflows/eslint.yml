@@ -13,6 +13,6 @@ jobs:
       run: npm install
     - name: Run ESLint
       run: node_modules/.bin/eslint build docs lib script spec-main -f node_modules/@microsoft/eslint-formatter-sarif/sarif.js -o results.sarif || true # eslint exits 1 if it found anything to report :facepalm:
-    - uses: Anthophila/codeql-action/codeql/upload-sarif@master
+    - uses: github/codeql-action/upload-sarif@master
       with:
         sarif_file: results.sarif

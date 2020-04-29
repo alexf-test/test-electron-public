@@ -1,0 +1,30 @@
+name: "Run multiple tools"
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v1
+      with:
+        submodules: recursive
+
+    - name: Run npm install
+      run: npm install
+    - name: Run ESLint
+      run: node_modules/.bin/eslint build docs lib script spec-main -f node_modules/@microsoft/eslint-formatter-sarif/sarif.js -o eslint.sarif || true # eslint exits 1 if it found anything to report :facepalm:
+
+    - uses: AppThreat/sast-scan-action@master
+      with:
+        type: python,credscan
+      continue-on-error: true
+
+    - run: |
+        mkdir -p ../reports
+        cp eslint.sarif ../reports/
+        cp reports/*.sarif ../reports/
+        ls ../reports
+    - uses: github/codeql-action/upload-sarif@master
+      with:
+        sarif_file: ../reports

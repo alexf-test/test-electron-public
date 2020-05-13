@@ -581,8 +581,6 @@ source_set("electron_lib") {
 
   if (enable_remote_module) {
     sources += [
-      "shell/common/api/remote/object_life_monitor.cc",
-      "shell/common/api/remote/object_life_monitor.h",
       "shell/common/api/remote/remote_callback_freer.cc",
       "shell/common/api/remote/remote_callback_freer.h",
       "shell/common/api/remote/remote_object_freer.cc",
@@ -1271,7 +1269,7 @@ dist_zip("electron_chromedriver_zip") {
 
 mksnapshot_deps = [
   ":licenses",
-  "//tools/v8_context_snapshot:v8_context_snapshot_generator",
+  "//tools/v8_context_snapshot:v8_context_snapshot_generator($v8_snapshot_toolchain)",
   "//v8:mksnapshot($v8_snapshot_toolchain)",
 ]
 

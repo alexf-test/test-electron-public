@@ -12,7 +12,11 @@ jobs:
     - name: Run npm install
       run: npm install
     - name: Run ESLint
-      run: node_modules/.bin/eslint build docs lib script spec-main -f node_modules/@microsoft/eslint-formatter-sarif/sarif.js -o results.sarif || true # eslint exits 1 if it found anything to report :facepalm:
+      run: node_modules/.bin/eslint build docs lib script spec-main -f node_modules/@microsoft/eslint-formatter-sarif/sarif.js -o results.sarif || true # eslint exits 1 if it found anything to report :facepalm:  
+    - uses: actions/upload-artifact@v2
+      with:
+        name: results.sarif
+        path: results.sarif
     - uses: github/codeql-action/upload-sarif@main
       with:
         sarif_file: results.sarif

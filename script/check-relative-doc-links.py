@@ -17,7 +17,7 @@ def main():
   totalDirs = 0
   try:
     for root, dirs, files in os.walk(DOCS_DIR):
-      totalDirs += len(dirs)
+      totalDirs += len(dirs)fff
       for f in files:
         if f.endswith('.md'):
           filepaths.append(os.path.join(root, f))

@@ -22,8 +22,8 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/ssl/security_state_tab_helper.h"
-#include "content/browser/frame_host/frame_tree_node.h"             // nogncheck
-#include "content/browser/frame_host/render_frame_host_manager.h"   // nogncheck
+#include "content/browser/renderer_host/frame_tree_node.h"  // nogncheck
+#include "content/browser/renderer_host/render_frame_host_manager.h"  // nogncheck
 #include "content/browser/renderer_host/render_widget_host_impl.h"  // nogncheck
 #include "content/browser/renderer_host/render_widget_host_view_base.h"  // nogncheck
 #include "content/common/widget_messages.h"
@@ -392,10 +392,20 @@ base::string16 GetDefaultPrinterAsync() {
   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                                 base::BlockingType::MAY_BLOCK);
 
-  scoped_refptr<printing::PrintBackend> backend =
+  scoped_refptr<printing::PrintBackend> print_backend =
       printing::PrintBackend::CreateInstance(
-          nullptr, g_browser_process->GetApplicationLocale());
-  std::string printer_name = backend->GetDefaultPrinterName();
+          g_browser_process->GetApplicationLocale());
+  std::string printer_name = print_backend->GetDefaultPrinterName();
+
+  // Some devices won't have a default printer, so we should
+  // also check for existing printers and pick the first
+  // one should it exist.
+  if (printer_name.empty()) {
+    printing::PrinterList printers;
+    print_backend->EnumeratePrinters(&printers);
+    if (printers.size() > 0)
+      printer_name = printers.front().printer_name;
+  }
   return base::UTF8ToUTF16(printer_name);
 }
 #endif
@@ -1558,7 +1568,7 @@ void WebContents::SetBackgroundThrottling(bool allowed) {
   web_contents()->GetRenderViewHost()->SetSchedulerThrottling(allowed);
 
   if (rwh_impl->is_hidden()) {
-    rwh_impl->WasShown(base::nullopt);
+    rwh_impl->WasShown({});
   }
 }
 
@@ -2068,8 +2078,9 @@ void WebContents::Print(gin::Arguments* args) {
   // Set whether to print color or greyscale
   bool print_color = true;
   options.Get("color", &print_color);
-  int color_setting = print_color ? printing::COLOR : printing::GRAY;
-  settings.SetIntKey(printing::kSettingColor, color_setting);
+  auto const color_model = print_color ? printing::mojom::ColorModel::kColor
+                                       : printing::mojom::ColorModel::kGray;
+  settings.SetIntKey(printing::kSettingColor, static_cast<int>(color_model));
 
   // Is the orientation landscape or portrait.
   bool landscape = false;
@@ -2183,10 +2194,10 @@ void WebContents::Print(gin::Arguments* args) {
                      std::move(callback), device_name, silent));
 }
 
-std::vector<printing::PrinterBasicInfo> WebContents::GetPrinterList() {
-  std::vector<printing::PrinterBasicInfo> printers;
+printing::PrinterList WebContents::GetPrinterList() {
+  printing::PrinterList printers;
   auto print_backend = printing::PrintBackend::CreateInstance(
-      nullptr, g_browser_process->GetApplicationLocale());
+      g_browser_process->GetApplicationLocale());
   {
     // TODO(deepak1556): Deprecate this api in favor of an
     // async version and post a non blocing task call.
